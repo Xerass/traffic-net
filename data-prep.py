@@ -108,7 +108,7 @@ CLASS_MAP = {
     "others": 3,
 }
 
-# Default image dimensions if PIL can't read the file (UA-DETRAC standard)
+# default image dimensions if PIL can't read the file (UA-DETRAC standard)
 # This is a safety net, not the primary path we always try PIL first
 DEFAULT_IMG_W = 960
 DEFAULT_IMG_H = 540
@@ -308,10 +308,12 @@ def parse_and_convert(xml_path: Path,
 # generate the config file for yolo
 # data.yaml supports train, val, and test fields
 # train and val are required, test is optional (used by `yolo val` / `yolo predict`)
-def generate_data_yaml(output_dir: Path):
+def generate_data_yaml(output_dir: Path, has_test: bool = False):
     #very simple to make, yolo has several things you can fill in the config file but all we need for this is just
     #path (root path of dataset)
     #train,val,test (dirs of train,val,test), nc (number of classes), names (class names)
+
+    test_line = "\ntest: images/test" if has_test else ""
 
     yaml_content = f"""\
 
@@ -320,8 +322,7 @@ def generate_data_yaml(output_dir: Path):
 
 path: {output_dir.resolve().as_posix()}
 train: images/train
-val: images/val
-test: images/test
+val: images/val{test_line}
 
 nc: {len(CLASS_MAP)}
 
@@ -428,6 +429,13 @@ def process_split(split_name: str, layout: dict):
 
     out_img_dir = OUTPUT_DIR / "images" / split_name
     out_lbl_dir = OUTPUT_DIR / "labels" / split_name
+
+    # skip if this split was already processed (has images)
+    if out_img_dir.exists() and any(out_img_dir.glob("*.jpg")):
+        existing_count = len(list(out_img_dir.glob("*.jpg")))
+        print(f"\n  [{split_name}] Already processed ({existing_count} images found), skipping.")
+        return None
+
     out_img_dir.mkdir(parents=True, exist_ok=True)
     out_lbl_dir.mkdir(parents=True, exist_ok=True)
 
@@ -499,9 +507,13 @@ def main():
     # in the downloaded dataset (separate from train annotations)
 
     # generate the yaml
-    print("\n[4/4] Generating data.yaml...")
-    has_test = (OUTPUT_DIR / "images" / "test").exists()
-    generate_data_yaml(OUTPUT_DIR, has_test=has_test)
+    yaml_path = OUTPUT_DIR / "data.yaml"
+    if yaml_path.exists():
+        print("\n[4/4] data.yaml already exists, skipping.")
+    else:
+        print("\n[4/4] Generating data.yaml...")
+        has_test = (OUTPUT_DIR / "images" / "test").exists()
+        generate_data_yaml(OUTPUT_DIR, has_test=has_test)
 
     # verify
     verify_output(OUTPUT_DIR)
