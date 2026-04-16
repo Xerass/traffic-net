@@ -11,23 +11,32 @@ import torch
 import os
 import sys
 import shutil
+import time
+
+try:
+    import runpod
+except ImportError:
+    runpod = None
 
 
 #script directory
 SCRIPT_DIR = Path(__file__).resolve().parent
 DATA_YAML = SCRIPT_DIR / "data" / "data.yaml"
 
-
 # LOCAL  = True: train on small portion of data (0.05%), sole purpose is to test
 # LOCAL  = False : trains on the full data
 
-LOCAL_MODE = True
+LOCAL_MODE = False
+
+# RunPod Auto-Shutdown (ensure 'pip install runpod' is run and RUNPOD_API_KEY env var is set)
+AUTO_STOP_POD = True 
+RUNPOD_API_KEY = os.environ.get("RUNPOD_API_KEY", "")
 
 #for local mode we use nano, in cloud we will use large model ~roughly 10x the params
 if LOCAL_MODE:
     MODEL_VARIANT = "yolov8n.pt"  # nano for fast local iteration
 else:
-    MODEL_VARIANT = "yolov8l.pt"  # medium for cloud — adjust as needed
+    MODEL_VARIANT = "yolov8s.pt"  # medium for cloud, adjust as needed
 
 
 #training params
@@ -42,7 +51,7 @@ if LOCAL_MODE:
 else:
     # -Cloud settings, full dataset, more workers, more batches and epochs, more patience
     EPOCHS       = 100     
-    BATCH_SIZE   = 32      
+    BATCH_SIZE   = 64      # Increased to 64: the RTX 5090 has 32GB VRAM, can easily handle this!
     IMG_SIZE     = 640     
     FRACTION     = 1.0      
     WORKERS      = 8        
@@ -174,6 +183,26 @@ def train():
     print(f'from ultralytics import YOLO')
     print(f'model = YOLO("{best_model}")')
     print(f'results = model.predict("your_image.jpg")')
+
+    # RunPod Auto-Stop Logic
+    if not LOCAL_MODE and AUTO_STOP_POD and os.environ.get("RUNPOD_POD_ID"):
+        if runpod is None:
+            print("\n[WARN] 'runpod' python package not installed. Cannot auto-stop pod.")
+            print("Please run 'pip install runpod' next time.")
+        elif not RUNPOD_API_KEY:
+            print("\n[WARN] RUNPOD_API_KEY not set in environment variables. Cannot auto-stop pod.")
+        else:
+            pod_id = os.environ.get("RUNPOD_POD_ID")
+            print(f"\n[INFO] Auto-stopping RunPod Pod {pod_id} in 60 seconds to save costs...")
+            print("[INFO] (Your 'runs' directory will be safely preserved on the volume!)")
+            runpod.api_key = RUNPOD_API_KEY
+            # Wait a bit to ensure all buffers (like Weights & Biases if used) have flushed
+            time.sleep(60) 
+            try:
+                runpod.stop_pod(pod_id)
+                print("[INFO] Shutdown command sent successfully.")
+            except Exception as e:
+                print(f"[ERR] Failed to stop pod: {e}")
 
 
 if __name__ == "__main__":
